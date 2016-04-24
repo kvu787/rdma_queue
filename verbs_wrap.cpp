@@ -56,11 +56,14 @@ static void die(const std::string reason) {
   std::cerr << reason << std::endl;
   exit(EXIT_FAILURE);
 }
+
+static const std::string DEVICE_NAME = "mlx4_0";
+
 // TEST_NZ and TEST_Z are macros to automatically check returned errors on
 // function calls and exit with an informative message.
-#define TEST_NULL(x) do { if ((x) == NULL) die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned NULL)." ); } while (0)
-#define TEST_Z(x)    do { if ((x) == 0)    die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned zero)."); } while (0)
-#define TEST_NZ(x)   do { if ((x) != 0)    die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned non-zero)." ); } while (0)
+#define TEST_NULL(x) do { if ((x) == nullptr) die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned NULL)." ); } while (0)
+#define TEST_Z(x)    do { if ((x) == 0)       die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned zero)."); } while (0)
+#define TEST_NZ(x)   do { if ((x) != 0)       die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned non-zero)." ); } while (0)
 
 // CreateContext tries to create an ibv_context from InfiniBand device 0.
 // For this program, each process only needs 1 context to setup the necessary
@@ -82,16 +85,25 @@ struct ibv_context *CreateContext() {
   if (num_devices < DEVICE_NUM) {
     die("CreateContext: not enouch infiniband devices");
   }
-  std::cout << "CreateContext: found " << num_devices << " device(s)" << std::endl;
+  // std::cout << "CreateContext: found " << num_devices << " device(s)" << std::endl;
 
   // Choose a device.
-  struct ibv_device *device = device_list[DEVICE_NUM];
-  std::cout << "CreateContext: chose device with name " << ibv_get_device_name(device) << std::endl;
+  struct ibv_device *device = nullptr;
+  for( int i = 0; i < num_devices; ++i ) {
+    const char *device_name;
+    TEST_NULL(device_name = ibv_get_device_name(device_list[i]));
+    if (DEVICE_NAME == ibv_get_device_name(device_list[i])) {
+      device = device_list[i];
+    }
+  }
+  if (device == nullptr) {
+    die("CreateContext: desired device not found");
+  }
 
   // Create a context from the device. (Sort of like opening a file.)
   struct ibv_context *context;
   TEST_NULL(context = ibv_open_device(device));
-  std::cout << "CreateContext: created context from device" << std::endl;
+  // std::cout << "CreateContext: created context from device" << std::endl;
 
   return context;
 }
@@ -100,7 +112,7 @@ struct ibv_context *CreateContext() {
 struct ibv_cq *CreateCompletionQueue(ibv_context *context) {
   struct ibv_cq *cq;
   TEST_NULL(cq = ibv_create_cq(context, COMPLETION_QUEUE_ENTRIES, NULL, NULL, 0));
-  std::cout << "CreateCompletionQueue: success" << std::endl;
+  // std::cout << "CreateCompletionQueue: success" << std::endl;
 
   return cq;
 }
@@ -112,7 +124,7 @@ struct ibv_cq *CreateCompletionQueue(ibv_context *context) {
 struct ibv_pd *CreateProtectionDomain(ibv_context *context) {
   ibv_pd *pd;
   TEST_NULL(pd = ibv_alloc_pd(context));
-  std::cout << "CreateProtectionDomain: success" << std::endl;
+  // std::cout << "CreateProtectionDomain: success" << std::endl;
 
   return pd;
 }
@@ -143,7 +155,7 @@ struct ibv_qp *CreateQueuePair(ibv_pd *pd, ibv_cq *cq) {
 
   struct ibv_qp *qp;
   TEST_NULL(qp = ibv_create_qp(pd, &qp_init_attr));
-  std::cout << "CreateQueuePair: success" << std::endl;
+  // std::cout << "CreateQueuePair: success" << std::endl;
 
   return qp;
 }
@@ -214,12 +226,12 @@ void ConnectQueuePair(ibv_qp *local_qp, int remote_lid, int remote_qp_num) {
   // qp: rtr -> rts
   struct ibv_qp_attr rts_qp_attr;
   memset(&rts_qp_attr, 0, sizeof(rts_qp_attr));
-  rtr_qp_attr.qp_state = IBV_QPS_RTS;
-  rtr_qp_attr.timeout = TIMEOUT;             // Mellanox recommendation
-  rtr_qp_attr.retry_cnt = RETRY_CNT;         // Mellanox recommendation
-  rtr_qp_attr.rnr_retry = RNR_RETRY;         // Mellanox recommendation
-  rtr_qp_attr.sq_psn = SQ_PSN;               // send packet sequence number, should match rq_psn
-  rtr_qp_attr.max_rd_atomic = MAX_RD_ATOMIC; // # of outstanding RDMA reads and atomic ops allowed
+  rts_qp_attr.qp_state = IBV_QPS_RTS;
+  rts_qp_attr.timeout = TIMEOUT;             // Mellanox recommendation
+  rts_qp_attr.retry_cnt = RETRY_CNT;         // Mellanox recommendation
+  rts_qp_attr.rnr_retry = RNR_RETRY;         // Mellanox recommendation
+  rts_qp_attr.sq_psn = SQ_PSN;               // send packet sequence number, should match rq_psn
+  rts_qp_attr.max_rd_atomic = MAX_RD_ATOMIC; // # of outstanding RDMA reads and atomic ops allowed
 
   TEST_NZ(ibv_modify_qp(local_qp, &rts_qp_attr,
     IBV_QP_STATE |
@@ -229,5 +241,4 @@ void ConnectQueuePair(ibv_qp *local_qp, int remote_lid, int remote_qp_num) {
     IBV_QP_SQ_PSN |
     IBV_QP_MAX_QP_RD_ATOMIC));
   std::cout << "SUCCESS" << std::endl;
-  perror("yolo");
 }
