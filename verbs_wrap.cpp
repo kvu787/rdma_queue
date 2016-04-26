@@ -7,28 +7,59 @@
 #include <cstdlib>
 #include <cstring>
 
-// constants to choose ports, tune performance parameters, etc.
-// basically, we have this instead of messy command line parameters
+////////////////////////
+/// Helper functions
+////////////////////////
 
-// CreateContext
-static const int DEVICE_NUM = 0; // The index of the physical InfiniBand device
-                                 // in the list of IB devices. We'll just use
-                                 // the first one.
-static const uint8_t PORT_NUM = 1; // Sampa IB devices only have 1 port, so
-                                   // we'll use that port. (Valid port numbers
-                                   // start at 1.)
+// die, TEST_NZ, TEST_Z adapted from:
+// https://sites.google.com/a/bedeir.com/home/basic-rdma-client-server.tar.gz?attredirects=0&d=1
+static void die(const std::string reason) {
+  std::cerr << reason << std::endl;
+  exit(EXIT_FAILURE);
+}
 
-// CreateCompletionQueue
+// TEST_NZ and TEST_Z are macros to automatically check returned errors on
+// function calls and exit with an informative message.
+#define TEST_NULL(x) do { if ((x) == nullptr) die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned NULL)." ); } while (0)
+#define TEST_Z(x)    do { if ((x) == 0)       die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned zero)."); } while (0)
+#define TEST_NZ(x)   do { if ((x) != 0)       die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned non-zero)." ); } while (0)
+#define TEST_NEG(x)  do { if ((x) < 0)        die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned non-zero)." ); } while (0)
+
+//////////////////////////////
+/// Configuration constants
+//////////////////////////////
+
+// We use the following constants to choose device ports, tune performance
+// parameters, etc. for the RDMA setup.
+// We use these hardcoded values instead of command line parameters.
+
+/*** CreateContext ***/
+
+// The name of the InfiniBand device (sort of like a network interface card)
+// we want to choose.
+//
+// I found this name with 'ibv_get_device_name'. Some Sampa nodes have more
+// than 1 device, but for some reason, the device that
+// isn't mlx4_0 doesn't work.
+static const std::string DEVICE_NAME = "mlx4_0";
+
+// Valid port numbers go from 1 to n. We'll just use the first port.
+static const uint8_t PHYS_PORT_NUM = 1;
+
+/*** CreateCompletionQueue ***/
+
 static const int COMPLETION_QUEUE_ENTRIES = 256;
 
-// CreateQueuePair
-static const uint32_t MAX_SEND_WR = 16; // how many operations per queue should we be able to enqueue at a time?
-static const uint32_t MAX_RECV_WR = 1; // only need 1 if we're just using RDMA ops
-static const uint32_t MAX_SEND_SGE = 1; // how many SGE's do we allow per send?
-static const uint32_t MAX_RECV_SGE = 1; // how many SGE's do we allow per receive?
+/*** CreateQueuePair ***/
+
+static const uint32_t MAX_SEND_WR = 16;     // how many operations per queue should we be able to enqueue at a time?
+static const uint32_t MAX_RECV_WR = 1;      // only need 1 if we're just using RDMA ops
+static const uint32_t MAX_SEND_SGE = 1;     // how many SGE's do we allow per send?
+static const uint32_t MAX_RECV_SGE = 1;     // how many SGE's do we allow per receive?
 static const uint32_t MAX_INLINE_DATA = 16; // message rate drops from 6M/s to 4M/s at 29 bytes
 
-// RegisterMemory and ConnectQueuePair
+/*** RegisterMemory and ConnectQueuePair ***/
+
 static const enum ibv_access_flags ACCESS_FLAGS =
   (enum ibv_access_flags) // cast so compiler doesn't complain
   (IBV_ACCESS_LOCAL_WRITE  | // we allow all operations except memory windows
@@ -36,34 +67,24 @@ static const enum ibv_access_flags ACCESS_FLAGS =
    IBV_ACCESS_REMOTE_WRITE |
    IBV_ACCESS_REMOTE_ATOMIC);
 
-// ConnectQueuePair
-// reset -> init
-static const uint8_t PHYS_PORT_NUM = 1;
+/*** ConnectQueuePair ***/
+
 // init -> rtr
 static const enum ibv_mtu PATH_MTU = IBV_MTU_512; // use lowest to be safe
-static const uint32_t RQ_PSN = 0;
+static const uint32_t RQ_PSN = 0;             // needs to match SQ_PSN
 static const uint8_t MAX_DEST_RD_ATOMIC = 16; // how many outstanding reads/atomic ops are allowed? (remote end of qp, limited by card)
-static const uint8_t MIN_RNR_TIMER = 12;
+static const uint8_t MIN_RNR_TIMER = 12;      // Mellanox recommendation
+
 // rtr -> rts
-static const uint8_t TIMEOUT = 0x12;  // Mellanox recommendation
-static const uint8_t RETRY_CNT = 6; // Mellanox recommendation
-static const uint8_t RNR_RETRY = 0; // Mellanox recommendation
-static const uint32_t SQ_PSN = RQ_PSN; // needs to match rq_psn
+static const uint8_t TIMEOUT = 14;     // Mellanox recommendation
+static const uint8_t RETRY_CNT = 7;    // Mellanox recommendation
+static const uint8_t RNR_RETRY = 7;    // Mellanox recommendation
+static const uint32_t SQ_PSN = RQ_PSN; // needs to match RQ_PSN
 static const uint16_t MAX_RD_ATOMIC = 16;
 
-// die, TEST_NZ, TEST_Z adapted from ...
-static void die(const std::string reason) {
-  std::cerr << reason << std::endl;
-  exit(EXIT_FAILURE);
-}
-
-static const std::string DEVICE_NAME = "mlx4_0";
-
-// TEST_NZ and TEST_Z are macros to automatically check returned errors on
-// function calls and exit with an informative message.
-#define TEST_NULL(x) do { if ((x) == nullptr) die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned NULL)." ); } while (0)
-#define TEST_Z(x)    do { if ((x) == 0)       die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned zero)."); } while (0)
-#define TEST_NZ(x)   do { if ((x) != 0)       die(__FILE__ ":" + std::to_string(__LINE__) + " " "error: " #x " failed (returned non-zero)." ); } while (0)
+///////////////////////////////
+/// Function implementations
+///////////////////////////////
 
 // CreateContext tries to create an ibv_context from InfiniBand device 0.
 // For this program, each process only needs 1 context to setup the necessary
@@ -82,8 +103,8 @@ struct ibv_context *CreateContext() {
   int num_devices;
   struct ibv_device **device_list;
   TEST_NULL(device_list = ibv_get_device_list(&num_devices));
-  if (num_devices < DEVICE_NUM) {
-    die("CreateContext: not enouch infiniband devices");
+  if (num_devices == 0) {
+    die("CreateContext: no InfiniBand devices found");
   }
   // std::cout << "CreateContext: found " << num_devices << " device(s)" << std::endl;
 
@@ -103,7 +124,7 @@ struct ibv_context *CreateContext() {
   // Create a context from the device. (Sort of like opening a file.)
   struct ibv_context *context;
   TEST_NULL(context = ibv_open_device(device));
-  // std::cout << "CreateContext: created context from device" << std::endl;
+  std::cout << "CreateContext: success" << std::endl;
 
   return context;
 }
@@ -155,14 +176,14 @@ struct ibv_qp *CreateQueuePair(ibv_pd *pd, ibv_cq *cq) {
 
   struct ibv_qp *qp;
   TEST_NULL(qp = ibv_create_qp(pd, &qp_init_attr));
-  // std::cout << "CreateQueuePair: success" << std::endl;
+  std::cout << "CreateQueuePair: success, qp_num " << qp->qp_num << std::endl;
 
   return qp;
 }
 
-struct ibv_mr *RegisterMemory(ibv_pd *pd, void *addr, size_t length) {
-  struct ibv_mr *mr = NULL;
-  TEST_Z(ibv_reg_mr(pd, addr, length, ACCESS_FLAGS));
+ibv_mr *RegisterMemory(ibv_pd *pd, void *addr, size_t length) {
+  struct ibv_mr *mr;
+  TEST_NULL(mr = ibv_reg_mr(pd, addr, length, ACCESS_FLAGS));
   std::cout << "RegisterMemory: success" << std::endl;
 
   return mr;
@@ -240,5 +261,6 @@ void ConnectQueuePair(ibv_qp *local_qp, int remote_lid, int remote_qp_num) {
     IBV_QP_RNR_RETRY |
     IBV_QP_SQ_PSN |
     IBV_QP_MAX_QP_RD_ATOMIC));
-  std::cout << "SUCCESS" << std::endl;
+
+  std::cout << "ConnectQueuePair: success" << std::endl;
 }

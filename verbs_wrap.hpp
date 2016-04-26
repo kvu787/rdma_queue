@@ -1,8 +1,9 @@
+// verbs_wrap wraps several IB verbs functions into more convenient, higher
+// level functions that use config options defined in verbs_wrap.cpp.
 #pragma once
 
 #include <infiniband/verbs.h>
 #include <cstddef>
-#include <cinttypes>
 
 ibv_context *CreateContext();
 ibv_cq      *CreateCompletionQueue(ibv_context *context);
